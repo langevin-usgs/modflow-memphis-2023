@@ -76,15 +76,13 @@ Students will use their own laptop computers during the class.  A recent version
  12:30  Workshop – Generate Model Projections (continued) [JL]
   2:00  Discussion – McDonald Valley Problem [JH]
   2:30  Break
-  3:15  Lecture/Workshop – Advanced Topic: Lake Package [JH]
+  3:15  Lecture/Workshop – Parameter Estimation [MF]
   4:30  Adjourn
 ```
 
 ## Friday
 ```
-  8:00  Lecture/Workshop – Advanced Topics: Streamflow Routing Package [JH]
-  9:00  Lecture/Workshop – Advanced Topics: Water Mover Package [JH]
-  9:30  Lecture – Advanced Topics: MAW/UZF Packages [JH]
+  8:00  Lecture/Workshop – Advanced Packages: SFR/LAK/MAW/UZF/MVR [JH]
  10:00  Break
  10:15  Lecture/Workshop – Advanced Topics: Unstructured Grids [CL]
  10:45  Lecture/Workshop – Advanced Topics: XT3D [CL]
