@@ -21,6 +21,7 @@ dependencies:
   - numpy>=1.15.0
   - matplotlib>=1.4.0
   - flopy
+  - pyemu
   - python-dateutil>=2.4.0
   - affine
   - scipy
