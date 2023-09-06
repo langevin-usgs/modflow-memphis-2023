@@ -4,7 +4,7 @@ This course requires that software be installed prior to arriving at the class. 
 
 1.  USGS Modelviewer for MODFLOW 6 is available for download [here](https://www.usgs.gov/software/model-viewer-program-three-dimensional-visualization-ground-water-model-results) or [here](https://github.com/MODFLOW-USGS/modelviewer-mf6/releases/tag/1.0.0).  Online documentation for the program is available [here](https://modelviewer-mf6.readthedocs.io/en/latest/).
 
-2.  FeatureGridder and HeadViewer are two Windows programs will be provided to course participants.  These are USGS training tools that we use in the class.
+2.  FeatureGridder and HeadViewer are two Windows programs that are used as training tools for the class.  These programs are included in this repository in the software folder.  Neither of these programs have an installer; instead they can be run by double-clicking on the executable program.
 
 3.  Python (preferably 3.10 or newer).  [Miniconda](https://docs.conda.io/en/latest/miniconda.html) is a popular Python distribution that runs on Windows, Mac, and Linux.
 
