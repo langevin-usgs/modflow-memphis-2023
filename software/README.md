@@ -8,7 +8,9 @@ This course requires that software be installed prior to arriving at the class. 
 
 3.  Python (preferably 3.10 or newer).  [Miniconda](https://docs.conda.io/en/latest/miniconda.html) is a popular Python distribution that runs on Windows, Mac, and Linux.
 
-4.  Use conda to install a customized environment for FloPy and MODFLOW. The first step is create a file called `modflow_training_environment.yml`.  This file should contain the following contents.
+4.  MODFLOW 6 and related utilites.  The latest version of MODFLOW 6 can be downloaded from the [USGS MODFLOW 6 website](https://www.usgs.gov/software/modflow-6-usgs-modular-hydrologic-model).  MODFLOW 6 is also available for other operating systems on the [releases tab](https://github.com/MODFLOW-USGS/modflow6/releases) of the MODFLOW 6 GitHub repository.  The MODFLOW 6 program does not come with an installer, however, it may be beneficial to put the software in a folder and modify the system PATH variable to point to it.
+
+5.  Use conda to install a customized environment for FloPy and MODFLOW. The first step is create a file called `modflow_training_environment.yml`.  This file should contain the following contents.
 
 ```
 name: modflow_training
