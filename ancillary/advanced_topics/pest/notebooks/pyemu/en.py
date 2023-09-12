@@ -773,7 +773,8 @@ class ObservationEnsemble(Ensemble):
             warnings.warn("ObservationEnsemble.from_gaussian_draw(): all zero weights",PyemuWarning)
         # only draw for non-zero weights, get a new cov
         if not fill:
-            nz_cov = cov.get(pst.nnz_obs_names)
+            names = set(pst.nnz_obs_names).intersection(set(cov.row_names))
+            nz_cov = cov.get(list(names))
         else:
             nz_cov = cov.copy()
 
@@ -809,17 +810,71 @@ class ObservationEnsemble(Ensemble):
             this method to evaluate new weighting strategies
 
         """
+        return self.get_phi_vector() 
+    
+    def get_phi_vector(self, noise_obs_filename=None, noise_obs_flag=False):
+        if noise_obs_filename is not None:
+            noise_obs_flag = True
+        if noise_obs_flag is True:
+            # if no noise_obs_filename included, try to grab from pst object
+            if noise_obs_filename is None:
+                try:
+                    noise_obs_filename = self.pst.pestpp_options['ies_observation_ensemble']
+                except:
+                    raise Exception(
+                            "no noise_observation_filename passed or found in pst options"
+                        )
+            # if it looks like a binary file, try loading from binary
+            if (noise_obs_filename.endswith('jcb')) or (noise_obs_filename.endswith('jco')):
+                try:
+                    noise_obs = pyemu.Matrix.from_binary(noise_obs_filename).to_dataframe()
+                except:
+                    raise Exception(
+                        f"Could not open {noise_obs_filename}"
+                    )
+            # otherwise assume it's a csv
+            else:
+                kwargs = {}
+                kwargs["index_col"] = 0
+                kwargs["low_memory"] = False
+                try:
+                    noise_obs = pd.read_csv(noise_obs_filename, **kwargs)
+                except:
+                    raise Exception(
+                        f"Could not open {noise_obs_filename}"
+                    )
+            # make sure the index is all string (since the real)
+            noise_obs.index = [str(i) for i in noise_obs.index]   
+                     
         cols = self._df.columns
         pst = self.pst
-        weights = self.pst.observation_data.loc[cols, "weight"]
-        obsval = self.pst.observation_data.loc[cols, "obsval"]
+        ogroups = pst.observation_data.loc[cols].groupby("obgnme").groups
+        res = pd.DataFrame(data={'name':cols,
+                                'group':pst.observation_data.loc[cols,'obgnme'].values,
+                                'modelled':np.nan,
+                                'residual':np.nan
+                                    })
+        res.index = res.name
+        obs = pst.observation_data.loc[cols, ['obsval','weight']]
+        pi_ogroups = None
+        pi_df = None
         phi_vec = []
         for idx in self._df.index.values:
-            simval = self._df.loc[idx, cols]
-            phi = (((simval - obsval) * weights) ** 2).sum()
+            res.loc[cols,'modelled'] = self._df.loc[idx, cols]
+            if noise_obs_flag is True:
+                obs.loc[cols,'obsval'] = noise_obs.loc[idx,cols]
+            res.loc[cols,'residual'] = res.loc[cols,'modelled'] - obs.loc[cols,'obsval']
+            
+            phi = 0.0
+            for _, contrib in pyemu.Pst.get_phi_components(ogroups,
+                                                            res,
+                                                            obs,
+                                                            pi_ogroups,
+                                                            pi_df).items():
+                phi += contrib
             phi_vec.append(phi)
         return pd.Series(data=phi_vec, index=self.index)
-
+               
     def add_base(self):
         """add the control file `obsval` values as a realization
 
@@ -1175,7 +1230,7 @@ class ParameterEnsemble(Ensemble):
         # gaussian
         pes = []
         if len(how_groups["gaussian"]) > 0:
-            gset = set(how_groups["gaussian"])
+            gset = how_groups["gaussian"]
             par_gaussian = par_org.loc[gset, :]
             # par_gaussian.sort_values(by="parnme", inplace=True)
             par_gaussian.sort_index(inplace=True)
@@ -1184,7 +1239,7 @@ class ParameterEnsemble(Ensemble):
             if cov is not None:
                 cset = set(cov.row_names)
                 # gset = set(how_groups["gaussian"])
-                diff = gset.difference(cset)
+                diff = set(gset).difference(cset)
                 assert len(diff) == 0, (
                     "ParameterEnsemble.from_mixed_draws() error: the 'cov' is not compatible with "
                     + " the parameters listed as 'gaussian' in how_dict, the following are not in the cov:{0}".format(
@@ -1226,7 +1281,7 @@ class ParameterEnsemble(Ensemble):
                 df.loc[:, p] = v
 
         for pe in pes:
-            df.loc[pe.index, pe.columns] = pe
+            df.loc[pe.index, pe.columns] = pe._df
 
         # this dropna covers both "fill" and "partial"
         df = df.dropna(axis=1)
@@ -1272,7 +1327,7 @@ class ParameterEnsemble(Ensemble):
             # check for scale differences - I don't who is dumb enough
             # to change scale between par files and pst...
             diff = df.scale - pst.parameter_data.scale
-            if diff.apply(np.abs).sum() > 0.0:
+            if diff.abs().sum() > 0.0:
                 warnings.warn(
                     "differences in scale detected, applying scale in par file",
                     PyemuWarning,
@@ -1545,7 +1600,7 @@ class ParameterEnsemble(Ensemble):
         else:
             raise Exception(
                 "unrecognized enforce_bounds arg:"
-                + "{0}, should be 'reset' or 'drop'".format(enforce_bounds)
+                + "{0}, should be 'reset' or 'drop'".format(how)
             )
 
     def _enforce_scale(self, bound_tol):
@@ -1604,6 +1659,7 @@ class ParameterEnsemble(Ensemble):
 
             if lbnd_facs.shape[0] > 0:
                 lmin = lbnd_facs.min()
+                # print(lbnd_facs)
                 lmin_idx = lbnd_facs.idxmin()
                 print(
                     "enforce_scale lbnd controlling parameter, scale factor, "

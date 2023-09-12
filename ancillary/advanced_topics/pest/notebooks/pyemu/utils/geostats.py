@@ -788,10 +788,10 @@ class OrdinaryKrige(object):
             warnings.warn(
                 "duplicates detected in point_data..attempting to rectify", PyemuWarning
             )
-            ux_std = point_data.groupby(point_data.name).std()["x"]
+            ux_std = point_data.groupby(point_data.name).x.std()
             if ux_std.max() > 0.0:
                 raise Exception("duplicate point_info entries with different x values")
-            uy_std = point_data.groupby(point_data.name).std()["y"]
+            uy_std = point_data.groupby(point_data.name).y.std()
             if uy_std.max() > 0.0:
                 raise Exception("duplicate point_info entries with different y values")
 
@@ -941,10 +941,16 @@ class OrdinaryKrige(object):
             )
 
         if var_filename is not None:
-            arr = (
-                np.zeros((self.spatial_reference.nrow, self.spatial_reference.ncol))
+            if self.spatial_reference.grid_type=='vertex':
+                arr = (
+                np.zeros((self.spatial_reference.ncpl, 1))
                 - 1.0e30
-            )
+                )
+            else:
+                arr = (
+                    np.zeros((self.spatial_reference.nrow, self.spatial_reference.ncol))
+                    - 1.0e30
+                )
 
         # the simple case of no zone array: ignore point_data zones
         if zone_array is None:
@@ -965,7 +971,10 @@ class OrdinaryKrige(object):
                 np.savetxt(var_filename, arr, fmt="%15.6E")
 
         if zone_array is not None:
-            assert zone_array.shape == x.shape
+            if self.spatial_reference.grid_type=='vertex':
+                assert zone_array.shape[0] == x.shape[0]
+            else:
+                assert zone_array.shape == x.shape
             if "zone" not in self.point_data.columns:
                 warnings.warn(
                     "'zone' columns not in point_data, assigning generic zone",
@@ -984,8 +993,13 @@ class OrdinaryKrige(object):
                     )
                     continue
                 # cutting list of cell positions to just in zone
-                xzone = x[zone_array == pt_data_zone].copy()
-                yzone = y[zone_array == pt_data_zone].copy()
+                if spatial_reference.grid_type == "vertex":
+                    xzone = x[(zone_array == pt_data_zone).ravel()].copy()
+                    yzone = y[(zone_array == pt_data_zone).ravel()].copy()
+                else:
+                    xzone = x[zone_array == pt_data_zone].copy()
+                    yzone = y[zone_array == pt_data_zone].copy()
+                
                 idx = np.arange(
                     len(zone_array.ravel())
                 )[(zone_array == pt_data_zone).ravel()]
@@ -1017,6 +1031,8 @@ class OrdinaryKrige(object):
                     fulldf = fulldf.reset_index()
                     a = fulldf.err_var.values.reshape(x.shape)
                     na_idx = np.isfinite(a.astype(float))
+                    if len(a.shape)==1:
+                        a = np.reshape(a, (a.shape[0], 1))
                     arr[na_idx] = a[na_idx]
             if self.interp_data is None or self.interp_data.dropna().shape[0] == 0:
                 raise Exception("no interpolation took place...something is wrong")
@@ -1275,13 +1291,14 @@ class OrdinaryKrige(object):
                 continue
 
             # only the maxpts_interp points
-            dist = dist.iloc[:maxpts_interp].apply(np.sqrt)
-            pt_names = dist.index.values
+            pt_names = dist.index.values[:maxpts_interp]
+            dist = np.sqrt(dist.values[:maxpts_interp])
+            
             # if one of the points is super close, just use it and skip
             if dist.min() <= EPSILON:
                 ifacts.append([1.0])
                 idist.append([EPSILON])
-                inames.append([dist.idxmin()])
+                inames.append([pt_names[dist.argmin()]])
                 err_var.append(self.geostruct.nugget)
                 continue
             # if verbose == 2:
@@ -1340,14 +1357,15 @@ class OrdinaryKrige(object):
 
             err_var.append(
                 float(
-                    sill
-                    + facs[-1]
-                    - sum([f * c for f, c in zip(facs[:-1], interp_cov)])
+                    (sill
+                     + facs[-1]
+                     - sum([f * c for f, c in zip(facs[:-1], interp_cov)])
+                     ).squeeze()
                 )
             )
             inames.append(pt_names)
 
-            idist.append(dist.values)
+            idist.append(dist)
             ifacts.append(facs[:-1, 0])
             # if verbose == 2:
             #     td = (datetime.now()-start).total_seconds()
@@ -1366,7 +1384,7 @@ class OrdinaryKrige(object):
             if self.interp_data is None:
                 self.interp_data = df
             else:
-                self.interp_data = self.interp_data.append(df)
+                self.interp_data = pd.concat([self.interp_data, df])
         # correct for negative kriging factors, if requested
         if remove_negative_factors == True:
             self._remove_neg_factors()
@@ -1558,9 +1576,10 @@ class OrdinaryKrige(object):
 
             err_var[idx] = [
                 float(
-                    sill
-                    + facs[-1]
-                    - sum([f * c for f, c in zip(facs[:-1], interp_cov)])
+                    (sill
+                     + facs[-1]
+                     - sum([f * c for f, c in zip(facs[:-1], interp_cov)])
+                     ).squeeze()
                 )
             ]
             inames[idx] = [pt_names.tolist()]
@@ -1606,6 +1625,9 @@ class OrdinaryKrige(object):
             nrow = 1
             if ncol < self.interp_data.shape[0]:
                 raise Exception("something is wrong")
+        elif self.spatial_reference.grid_type=='vertex':
+            nrow = self.spatial_reference.ncpl
+            ncol = 1
         else:
             nrow = self.spatial_reference.nrow
             ncol = self.spatial_reference.ncol

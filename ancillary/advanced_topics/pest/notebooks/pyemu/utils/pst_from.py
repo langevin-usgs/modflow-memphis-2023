@@ -157,6 +157,8 @@ class PstFrom(object):
         self.ult_ubound_fill = 1.0e30
         self.ult_lbound_fill = -1.0e30
         self.chunk_len = int(chunk_len)
+        self.py_functions = set()
+
 
     @property
     def parfile_relations(self):
@@ -219,7 +221,7 @@ class PstFrom(object):
                     if x is not None
                     else lb_max["lbound"]
                 )
-        pr["zero_based"] = self.zero_based
+        pr["zero_based"] = self.zero_based   # todo -- chase this out if going to file specific zero based def
         return pr
 
     def _generic_get_xy(self, args, **kwargs):
@@ -263,10 +265,17 @@ class PstFrom(object):
         if all([ij is None for ij in [i, j]]):
             return i, j
         else:
-            return (
-                self._spatial_reference.xcentergrid[i, j],
-                self._spatial_reference.ycentergrid[i, j],
-            )
+            if (hasattr(self._spatial_reference, "grid_type") and
+                    self._spatial_reference.grid_type == 'vertex'):
+                return (
+                    self._spatial_reference.xcentergrid[i, ],
+                    self._spatial_reference.ycentergrid[i, ],
+                )
+            else:
+                return (
+                    self._spatial_reference.xcentergrid[i, j],
+                    self._spatial_reference.ycentergrid[i, j],
+                )
 
     def _flopy_mg_get_xy(self, args, **kwargs):
         i, j = self.parse_kij_args(args, kwargs)
@@ -276,8 +285,13 @@ class PstFrom(object):
             if self._spatial_ref_xarray is None:
                 self._spatial_ref_xarray = self._spatial_reference.xcellcenters
                 self._spatial_ref_yarray = self._spatial_reference.ycellcenters
+            if (hasattr(self._spatial_reference, "grid_type") and
+                    self._spatial_reference.grid_type == 'vertex'):
+                return (self._spatial_ref_xarray[i, ],
+                        self._spatial_ref_yarray[i, ])
 
-            return (self._spatial_ref_xarray[i, j], self._spatial_ref_yarray[i, j])
+            return (self._spatial_ref_xarray[i, j],
+                    self._spatial_ref_yarray[i, j])
 
     def parse_kij_args(self, args, kwargs):
         """parse args into kij indices.  Called programmatically"""
@@ -299,14 +313,20 @@ class PstFrom(object):
                     self.ijwarned[self.add_pars_callcount] = True
                 # assume i and j are the final two entries in index_cols
                 i, j = args[-2], args[-1]
+
+                # vertex/list based i == cell number
+                if (hasattr(self._spatial_reference, "grid_type") and
+                    self._spatial_reference.grid_type == 'vertex'):
+                    i, l = args[-1], args[-2]
+
         else:
             if not self.ijwarned[self.add_pars_callcount]:
                 self.logger.warn(
                     (
                         "get_xy() warning: need locational information "
                         "(e.g. i,j) to generate xy, "
-                        "insufficient index cols passed to interpret: {}"
-                        ""
+                        "insufficient index cols passed to interpret: {}."
+                        "i,j will be set to (None,None)"
                     ).format(str(args))
                 )
                 self.ijwarned[self.add_pars_callcount] = True
@@ -403,8 +423,8 @@ class PstFrom(object):
             for _, l in gps.items():
                 df = pd.concat(l)
                 if "timedelta" in df.columns:
-                    df.loc[:, "y"] = 0  #
-                    df.loc[:, "x"] = df.timedelta.dt.days
+                    df["y"] = 0  #
+                    df["x"] = df.timedelta.dt.days
                 par_dfs.append(df)
             struct_dict[gs] = par_dfs
         return struct_dict
@@ -825,11 +845,11 @@ class PstFrom(object):
                 # shortnames from using previous a starting point (if existing)
                 obgpmap["shortname"] = "obg" + (obgpmap.index+gshtmx).astype(str)
                 ltobs = obgpmap.longname.str.startswith(
-                    pyemu.Pst.get_constraint_tags('lt')
+                    pyemu.pst.pst_handler.get_constraint_tags('lt')
                 )
                 obgpmap.loc[ltobs, "shortname"] = "l_" + obgpmap.loc[ltobs, "shortname"]
                 gtobs = obgpmap.longname.str.startswith(
-                    pyemu.Pst.get_constraint_tags('gt')
+                    pyemu.pst.pst_handler.get_constraint_tags('gt')
                 )
                 obgpmap.loc[gtobs, "shortname"] = "g_" + obgpmap.loc[gtobs, "shortname"]
                 obgpmap_dict = obgpmap.set_index('longname').shortname.to_dict()
@@ -950,7 +970,7 @@ class PstFrom(object):
                         sep = " "
                         if rel_filepath.suffix.lower() == ".csv":
                             sep = ","
-                if df.columns.is_integer():
+                if pd.api.types.is_integer_dtype(df.columns):  # df.columns.is_integer(): # really!???
                     hheader = False
                 else:
                     hheader = df.columns
@@ -975,7 +995,7 @@ class PstFrom(object):
                 if len(storehead) != 0:
                     kwargs = {}
                     if "win" in platform.platform().lower():
-                        kwargs = {"line_terminator": "\n"}
+                        kwargs = {"lineterminator": "\n"}
                     with open(org_file, "w") as fp:
                         lc = 0
                         fr = 0
@@ -1099,7 +1119,8 @@ class PstFrom(object):
         return self._prefix_count[prefix]
 
     def add_py_function(
-        self, file_name, call_str=None, is_pre_cmd=True, function_name=None
+            self, file_name, call_str=None, is_pre_cmd=True,
+            function_name=None
     ):
         """add a python function to the forward run script
 
@@ -1173,33 +1194,42 @@ class PstFrom(object):
         function_name = call_str[
             : call_str.find("(")
         ]  # strip to first occurance of '('
-        func_lines = []
-        search_str = "def " + function_name + "("
-        abet_set = set(string.ascii_uppercase)
-        abet_set.update(set(string.ascii_lowercase))
-        with open(file_name, "r") as f:
-            while True:
-                line = f.readline()
-                if line == "":
-                    self.logger.lraise(
-                        "add_py_function(): EOF while searching for function '{0}'".format(
-                            search_str
+        if function_name in self.py_functions:
+            # todo: could add more duplication options here: override, increment
+            warnings.warn(
+                f"add_py_function(): {function_name} already "
+                f"in forward run python functions, not overriding here, "
+                f"original will be maintained",
+                PyemuWarning,
+            )
+        else:
+            func_lines = []
+            search_str = "def " + function_name + "("
+            abet_set = set(string.ascii_uppercase)
+            abet_set.update(set(string.ascii_lowercase))
+            with open(file_name, "r") as f:
+                while True:
+                    line = f.readline()
+                    if line == "":
+                        self.logger.lraise(
+                            "add_py_function(): EOF while searching for function '{0}'".format(
+                                search_str
+                            )
                         )
-                    )
-                if line.startswith(
-                    search_str
-                ):  # case sens and no strip since 'def' should be flushed left
-                    func_lines.append(line)
-                    while True:
-                        line = f.readline()
-                        if line == "":
-                            break
-                        if line[0] in abet_set:
-                            break
+                    if line.startswith(
+                        search_str
+                    ):  # case sens and no strip since 'def' should be flushed left
                         func_lines.append(line)
-                    break
+                        while True:
+                            line = f.readline()
+                            if line == "":
+                                break
+                            if line[0] in abet_set:
+                                break
+                            func_lines.append(line)
+                        break
 
-        self._function_lines_list.append(func_lines)
+            self._function_lines_list.append(func_lines)
         if is_pre_cmd is True:
             self.pre_py_cmds.append(call_str)
         elif is_pre_cmd is False:
@@ -1210,6 +1240,7 @@ class PstFrom(object):
                     call_str
                 )
             )
+        self.py_functions.update({function_name})
 
     def _process_array_obs(
         self,
@@ -1788,7 +1819,8 @@ class PstFrom(object):
                 pargp but is also used to gather correlated parameters set up
                 using multiple `add_parameters()` calls (e.g. temporal pars)
                 with common geostructs.
-            pp_space (`int`,`str` or `pd.DataFrame`): Spatial pilot point information.
+            pp_space (`float`, `int`,`str` or `pd.DataFrame`): Spatial pilot point information.
+                If `float` or `int`, AND `spatial_reference` is of type VertexGrid, it is the spacing in model length untis between pilot points.
                 If `int` it is the spacing in rows and cols of where to place pilot points.
                 If `pd.DataFrame`, then this arg is treated as a prefined set of pilot points
                 and in this case, the dataframe must have "name", "x", "y", and optionally "zone" columns.
@@ -1893,7 +1925,9 @@ class PstFrom(object):
             par_style = par_style[0]
         if par_style not in ["m", "d", "a"]:
             self.logger.lraise(
-                "add_parameters(): unrecognized 'style': {0}, should be either 'm'/'mult'/'multiplier', 'a'/'add'/'addend' or 'd'/'direct'".format(
+                "add_parameters(): unrecognized 'style': {0}, "
+                "should be either 'm'/'mult'/'multiplier', "
+                "'a'/'add'/'addend' or 'd'/'direct'".format(
                     par_style
                 )
             )
@@ -1953,18 +1987,28 @@ class PstFrom(object):
                 self.logger.warn(
                     "0) Inconsistency between " "geostruct transform and partrans."
                 )
-                self.logger.warn(f"1) Setting geostruct transform to " "{transform}")
+                self.logger.warn(f"1) Setting geostruct transform to {transform}")
                 if geostruct not in self.par_struct_dict.keys():
                     # safe to just reset transform
                     geostruct.transform = transform
                 else:
-                    self.logger.warn("2) This will create a new copy of " "geostruct")
+                    self.logger.warn("2) This will create a new copy of geostruct")
                     # to avoid flip flopping transform need to make a new geostruct
                     geostruct = copy.copy(geostruct)
                     geostruct.transform = transform
                 self.logger.warn(
-                    "-) Better to pass an appropriately " "transformed geostruct"
+                    "-) Better to pass an appropriately transformed geostruct"
                 )
+        # big sr and zone dependancy checker here: todo - tidy?
+        checker = (
+                self._spatial_reference is not None
+                and not isinstance(self._spatial_reference, dict)
+                and self._spatial_reference.grid_type == 'vertex'
+                and zone_array is not None
+                and len(zone_array.shape) == 1
+        )
+        if checker:
+            zone_array = np.reshape(zone_array, (zone_array.shape[0], 1))
 
         # Get useful variables from arguments passed
         # if index_cols passed as a dictionary that maps i,j information
@@ -2109,7 +2153,7 @@ class PstFrom(object):
 
         pp_filename = None  # setup placeholder variables
         fac_filename = None
-
+        nxs = None
         # Process model parameter files to produce appropriate pest pars
         if index_cols is not None:  # Assume list/tabular type input files
             # ensure inputs are provided for all required cols
@@ -2138,7 +2182,7 @@ class PstFrom(object):
                 par_type.startswith("grid") or par_type.startswith("p")
             ) and geostruct is not None:
                 get_xy = self.get_xy
-            df = write_list_tpl(
+            df, nxs = write_list_tpl(
                 filenames,
                 dfs,
                 par_name_base,
@@ -2160,6 +2204,7 @@ class PstFrom(object):
                 fill_value=initial_value,
                 logger=self.logger,
             )
+            nxs = {fname: nx for fname, nx in zip(filenames, nxs)}
             assert (
                 np.mod(len(df), len(use_cols)) == 0.0
             ), "Parameter dataframe wrong shape for number of cols {0}" "".format(
@@ -2230,6 +2275,7 @@ class PstFrom(object):
                             "OK - using spatial reference " "in parent object."
                         )
                         spatial_reference = self.spatial_reference
+                        spatial_reference_type = spatial_reference.grid_type
                     else:
                         # uhoh
                         self.logger.lraise(
@@ -2243,18 +2289,26 @@ class PstFrom(object):
                     structured = True
                     for mod_file, ar in file_dict.items():
                         orgdata = ar.shape
-                        assert orgdata[0] == spatial_reference.nrow, (
-                            "Spatial reference nrow not equal to original data nrow for\n"
-                            + os.path.join(
-                                *os.path.split(self.original_file_d)[1:], mod_file
+                        if spatial_reference_type == 'vertex':
+                            assert orgdata[0] == spatial_reference.ncpl, (
+                                "Spatial reference ncpl not equal to original data ncpl for\n"
+                                + os.path.join(
+                                    *os.path.split(self.original_file_d)[1:], mod_file
+                                )
                             )
-                        )
-                        assert orgdata[1] == spatial_reference.ncol, (
-                            "Spatial reference ncol not equal to original data ncol for\n"
-                            + os.path.join(
-                                *os.path.split(self.original_file_d)[1:], mod_file
+                        else:
+                            assert orgdata[0] == spatial_reference.nrow, (
+                                "Spatial reference nrow not equal to original data nrow for\n"
+                                + os.path.join(
+                                    *os.path.split(self.original_file_d)[1:], mod_file
+                                )
                             )
-                        )
+                            assert orgdata[1] == spatial_reference.ncol, (
+                                "Spatial reference ncol not equal to original data ncol for\n"
+                                + os.path.join(
+                                    *os.path.split(self.original_file_d)[1:], mod_file
+                                )
+                            )
                 # (stolen from helpers.PstFromFlopyModel()._pp_prep())
                 # but only settting up one set of pps at a time
                 pnb = par_name_base[0]
@@ -2604,7 +2658,7 @@ class PstFrom(object):
             zone_filename = zone_filename.name
 
         relate_parfiles = []
-        for mod_file in file_dict.keys():
+        for mod_file, pdf in file_dict.items():
             mult_dict = {
                 "org_file": Path(self.original_file_d.name, mod_file.name),
                 "model_file": mod_file,
@@ -2617,6 +2671,8 @@ class PstFrom(object):
                 "lower_bound": ult_lbound,
                 "operator": par_style,
             }
+            if nxs:
+                mult_dict["chkpar"] = nxs[mod_file]
             if par_style in ["m", "a"]:
                 mult_dict["mlt_file"] = Path(self.mult_file_d.name, mlt_filename)
 
@@ -3054,7 +3110,7 @@ def write_list_tpl(
     # get dataframe with autogenerated parnames based on `name`, `index_cols`,
     # `use_cols`, `suffix` and `par_type`
     if par_style == "d":
-        df_tpl = _write_direct_df_tpl(
+        df_tpl, nxs = _write_direct_df_tpl(
             filenames[0],
             tpl_filename,
             dfs[0],
@@ -3090,8 +3146,8 @@ def write_list_tpl(
             par_fill_value=fill_value,
             par_style=par_style,
         )
-        idxs = [df.loc[:, index_cols].values.tolist() for df in dfs]
-        use_rows = _get_use_rows(
+        idxs = [[tuple(s) for s in df.loc[:, index_cols].values] for df in dfs]
+        use_rows, nxs = _get_use_rows(
             df_tpl, idxs, use_rows, zero_based, tpl_filename, logger=logger
         )
         df_tpl = df_tpl.loc[use_rows, :]  # direct pars done in direct function
@@ -3187,7 +3243,7 @@ def write_list_tpl(
     df_par.loc[:, "tpl_filename"] = tpl_filename
     df_par.loc[:, "input_filename"] = input_filename
     df_par.loc[:, "parval1"] = parval
-    return df_par
+    return df_par, nxs
 
 
 def _write_direct_df_tpl(
@@ -3271,8 +3327,8 @@ def _write_direct_df_tpl(
         init_df=df,
         init_fname=in_filename,
     )
-    idxs = df.loc[:, index_cols].values.tolist()
-    use_rows = _get_use_rows(
+    idxs = [tuple(s) for s in df.loc[:, index_cols].values]
+    use_rows, nxs = _get_use_rows(
         df_ti, [idxs], use_rows, zero_based, tpl_filename, logger=logger
     )
     df_ti = df_ti.loc[use_rows]
@@ -3285,7 +3341,7 @@ def _write_direct_df_tpl(
     pyemu.helpers._write_df_tpl(
         tpl_filename, direct_tpl_df, index=False, header=header, headerlines=headerlines
     )
-    return df_ti
+    return df_ti, nxs
 
 
 def _get_use_rows(tpldf, idxcolvals, use_rows, zero_based, fnme, logger=None):
@@ -3305,19 +3361,23 @@ def _get_use_rows(tpldf, idxcolvals, use_rows, zero_based, fnme, logger=None):
     """
     if use_rows is None:
         use_rows = tpldf.index
-        return use_rows
+        nxs = [len(set(idx)) for idx in idxcolvals]
+        return use_rows, nxs
     if np.ndim(use_rows) == 0:
         use_rows = [use_rows]
     if np.ndim(use_rows) == 1:  # assume we have collection of int that describe iloc
         use_rows = [idx[i] for i in use_rows for idx in idxcolvals]
+    else:
+        use_rows = [tuple(r) for r in use_rows]
+    nxs = [len(set(use_rows).intersection(idx)) for idx in idxcolvals]
+    orig_use_rows = use_rows.copy()
     if not zero_based:  # assume passed indicies are 1 based
         use_rows = [
-            tuple([i - 1 if isinstance(i, int) else i for i in r])
+            tuple([i - 1 if isinstance(i, (int, np.integer)) else i for i in r])
             if not isinstance(r, str)
             else r
             for r in use_rows
         ]
-    orig_use_rows = use_rows
     use_rows = set(use_rows)
     sel = tpldf.sidx.isin(use_rows) | tpldf.idx_strs.isin(use_rows)
     if not sel.any():  # use_rows must be ints
@@ -3347,7 +3407,7 @@ def _get_use_rows(tpldf, idxcolvals, use_rows, zero_based, fnme, logger=None):
         else:
             warnings.warn(msg, PyemuWarning)
         use_rows = tpldf.index
-    return use_rows
+    return use_rows, nxs
 
 
 def _get_index_strfmt(index_cols):
@@ -3550,7 +3610,6 @@ def _get_tpl_or_ins_df(
     Private method to auto-generate parameter or obs names from tabular
     model files (input or output) read into pandas dataframes
     Args:
-        filenames (`str` or `list` of str`): filenames
         dfs (`pandas.DataFrame` or `list`): DataFrames (can be list of DataFrames)
             to set up parameters or observations
         name (`str`): Parameter name or Observation name prefix
@@ -3592,21 +3651,15 @@ def _get_tpl_or_ins_df(
         dfs = list(dfs)
 
     # work out the union of indices across all dfs
-    if typ != "obs":
-        sidx = set()
-        for df in dfs:
-            # looses ordering
-            didx = set(df.loc[:, index_cols].apply(tuple, axis=1))
-            sidx.update(didx)
-    else:
-        # order matters for obs
-        sidx = []
-        for df in dfs:
-            didx = df.loc[:, index_cols].values
-            aidx = [i for i in didx if i not in sidx]
-            sidx.extend(aidx)
+    # order matters for obs
+    sidx = []
+    for df in dfs:
+        # avoiding df.values to prevent conversion to same type
+        didx = zip(*[df[col] for col in index_cols])
+        aidx = [i for i in didx if i not in sidx]
+        sidx.extend(aidx)
 
-    df_ti = pd.DataFrame({"sidx": list(sidx)}, columns=["sidx"])
+    df_ti = pd.DataFrame({"sidx": sidx}, columns=["sidx"])
     inames, fmt = _get_index_strfmt(index_cols)
     df_ti = _get_index_strings(df_ti, fmt, zero_based)
     df_ti = _getxy_from_idx(df_ti, get_xy, xy_in_idx, ij_in_idx)
@@ -3687,7 +3740,7 @@ def write_array_tpl(
     if par_style == "d":
         if not os.path.exists(input_filename):
             raise Exception(
-                "write_grid_tpl() error: couldn't find input file "
+                "write_array_tpl() error: couldn't find input file "
                 + " {0}, which is required for 'direct' par_style".format(
                     input_filename
                 )
@@ -3710,7 +3763,7 @@ def write_array_tpl(
         org_arr = np.zeros(shape)
     else:
         raise Exception(
-            "write_grid_tpl() error: unrecognized 'par_style' {0} ".format(par_style)
+            "write_array_tpl() error: unrecognized 'par_style' {0} ".format(par_style)
             + "should be 'd','a', or 'm'"
         )
 

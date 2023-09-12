@@ -21,7 +21,12 @@ from pyemu.plot import plot_utils
 
 # from pyemu.utils.os_utils import run
 
-
+def get_constraint_tags(ltgt='lt'):
+    if ltgt == 'lt':
+        return "l_", "less", ">@"
+    else:
+        return "g_", "greater", "<@"
+    
 class Pst(object):
     """All things PEST(++) control file
 
@@ -148,11 +153,69 @@ class Pst(object):
         return pst_utils.generic_pst(par_names=par_names, obs_names=obs_names)
 
     @staticmethod
-    def get_constraint_tags(ltgt='lt'):
-        if ltgt == 'lt':
-            return "l_", "less", ">@"
-        else:
-            return "g_", "greater", "<@"
+    def get_phi_components(ogroups,  res, obs, pi_ogroups=None, pi_df=None):
+
+        components = {}
+        rgroups = res.groupby("group").groups
+        for og, onames in ogroups.items():
+            og_res_df = res.loc[onames, :].dropna(axis=1)
+            og_df = obs.loc[onames, :]
+            # og_df.index = og_df.obsnme
+            assert og_df.shape[0] == og_res_df.shape[0], (
+                " Pst.phi_components error: group residual dataframe row length"
+                + "doesn't match observation data group dataframe row length"
+                + str(og_df.shape)
+                + " vs. "
+                + str(og_res_df.shape)
+                + ","
+                + og
+            )
+            if "modelled" not in og_res_df.columns:
+                print(og_res_df)
+                m = res.loc[onames, "modelled"]
+                print(m.loc[m.isna()])
+                raise Exception("'modelled' not in res df columns for group " + og)
+
+            mod_vals = og_res_df.loc[onames, "modelled"]
+            if og.lower().startswith(get_constraint_tags('gt')):
+                mod_vals.loc[mod_vals >= og_df.loc[:, "obsval"]] = og_df.loc[
+                    :, "obsval"
+                ]
+            elif og.lower().startswith(get_constraint_tags('lt')):
+                mod_vals.loc[mod_vals <= og_df.loc[:, "obsval"]] = og_df.loc[
+                    :, "obsval"
+                ]
+            components[og] = np.sum(
+                ((og_df.loc[:, "obsval"] - mod_vals) * og_df.loc[:, "weight"]) ** 2
+            )
+        if pi_ogroups is not None:
+            for og, onames in pi_ogroups.items():
+                if og not in rgroups.keys():
+                    raise Exception(
+                        "Pst.prior_information() obs group " + "not found: " + str(og)
+                    )
+                og_res_df = res.loc[rgroups[og], :]
+                og_res_df.index = og_res_df.name
+                og_df = pi_df.loc[onames, :]
+                og_df.index = og_df.pilbl
+                og_res_df = og_res_df.loc[og_df.index, :].copy()
+                if og_df.shape[0] != og_res_df.shape[0]:
+                    raise Exception(
+                        " Pst.phi_components error: group residual dataframe row length"
+                        + "doesn't match observation data group dataframe row length"
+                        + str(og_df.shape)
+                        + " vs. "
+                        + str(og_res_df.shape)
+                    )
+                if og.lower().startswith(get_constraint_tags('gt')):
+                    gidx = og_res_df.loc[:, "residual"] >= 0
+                    og_res_df.loc[gidx, "residual"] = 0
+                elif og.lower().startswith(get_constraint_tags('lt')):
+                    lidx = og_res_df.loc[:, "residual"] <= 0
+                    og_res_df.loc[lidx, "residual"] = 0
+                components[og] = np.sum((og_res_df["residual"] * og_df["weight"]) ** 2)
+
+        return components
 
     @property
     def phi(self):
@@ -183,80 +246,18 @@ class Pst(object):
 
         """
 
-        # calculate phi components for each obs group
-        components = {}
         ogroups = self.observation_data.groupby("obgnme").groups
-        rgroups = self.res.groupby("group").groups
         self.res.index = self.res.name
-        for og, onames in ogroups.items():
-            # assert og in rgroups.keys(),"Pst.phi_componentw obs group " +\
-            #    "not found: " + str(og)
-            # og_res_df = self.res.ix[rgroups[og]]
-            og_res_df = self.res.loc[onames, :].dropna(axis=1)
-            # og_res_df.index = og_res_df.name
-            og_df = self.observation_data.loc[ogroups[og], :]
-            og_df.index = og_df.obsnme
-            # og_res_df = og_res_df.loc[og_df.index,:]
-            assert og_df.shape[0] == og_res_df.shape[0], (
-                " Pst.phi_components error: group residual dataframe row length"
-                + "doesn't match observation data group dataframe row length"
-                + str(og_df.shape)
-                + " vs. "
-                + str(og_res_df.shape)
-                + ","
-                + og
-            )
-            if "modelled" not in og_res_df.columns:
-                print(og_res_df)
-                m = self.res.loc[onames, "modelled"]
-                print(m.loc[m.isna()])
-                raise Exception("'modelled' not in res df columns for group " + og)
-            # components[og] = np.sum((og_res_df["residual"] *
-            #                          og_df["weight"]) ** 2)
-            mod_vals = og_res_df.loc[og_df.obsnme, "modelled"]
-            if og.lower().startswith(self.get_constraint_tags('gt')):
-                mod_vals.loc[mod_vals >= og_df.loc[:, "obsval"]] = og_df.loc[
-                    :, "obsval"
-                ]
-            elif og.lower().startswith(self.get_constraint_tags('lt')):
-                mod_vals.loc[mod_vals <= og_df.loc[:, "obsval"]] = og_df.loc[
-                    :, "obsval"
-                ]
-            components[og] = np.sum(
-                ((og_df.loc[:, "obsval"] - mod_vals) * og_df.loc[:, "weight"]) ** 2
-            )
-        if (
-            not self.control_data.pestmode.startswith("reg")
-            and self.prior_information.shape[0] > 0
-        ):
-            ogroups = self.prior_information.groupby("obgnme").groups
-            for og in ogroups.keys():
-                if og not in rgroups.keys():
-                    raise Exception(
-                        "Pst.adjust_weights_res() obs group " + "not found: " + str(og)
-                    )
-                og_res_df = self.res.loc[rgroups[og], :]
-                og_res_df.index = og_res_df.name
-                og_df = self.prior_information.loc[ogroups[og], :]
-                og_df.index = og_df.pilbl
-                og_res_df = og_res_df.loc[og_df.index, :].copy()
-                if og_df.shape[0] != og_res_df.shape[0]:
-                    raise Exception(
-                        " Pst.phi_components error: group residual dataframe row length"
-                        + "doesn't match observation data group dataframe row length"
-                        + str(og_df.shape)
-                        + " vs. "
-                        + str(og_res_df.shape)
-                    )
-                if og.lower().startswith(self.get_constraint_tags('gt')):
-                    gidx = og_res_df.loc[:, "residual"] >= 0
-                    og_res_df.loc[gidx, "residual"] = 0
-                elif og.lower().startswith(self.get_constraint_tags('lt')):
-                    lidx = og_res_df.loc[:, "residual"] <= 0
-                    og_res_df.loc[lidx, "residual"] = 0
-                components[og] = np.sum((og_res_df["residual"] * og_df["weight"]) ** 2)
-
-        return components
+        obs = self.observation_data[['obsval','weight']]
+        if (not self.control_data.pestmode.startswith("reg")
+            and self.prior_information.shape[0] > 0):
+            pi_ogroups = self.prior_information.groupby("obgnme").groups
+            pi_df = self.prior_information
+        else:
+            pi_ogroups = None
+            pi_df = None
+        return self.get_phi_components(ogroups, self.res, obs, pi_ogroups, pi_df)
+       
 
     @property
     def phi_components_normalized(self):
@@ -320,7 +321,8 @@ class Pst(object):
                         "Pst.res: self.resfile " + str(self.resfile) + " does not exist"
                     )
             else:
-                self.resfile = self.filename.replace(".pst", ".res")
+                filename = str(self.filename)
+                self.resfile = filename.replace(".pst", ".res")
                 if not os.path.exists(self.resfile):
                     self.resfile = self.resfile.replace(".res", ".rei")
                     if not os.path.exists(self.resfile):
@@ -675,7 +677,7 @@ class Pst(object):
             return None
 
     @staticmethod
-    def _read_df(f, nrows, names, converters, defaults=None):
+    def _read_df(f, nrows, names, converters, defaults=None):  # todo : drop method? seems to not be used?
         """a private method to read part of an open file into a pandas.DataFrame.
 
         Args:
@@ -896,9 +898,11 @@ class Pst(object):
             if col in defaults:
                 df.loc[:, col] = df.loc[:, col].fillna(defaults[col])
             if col in converters:
-
-                df.loc[:, col] = df.loc[:, col].apply(converters[col])
-
+                # pandas 2.0 `df.loc[:, col] = df.loc[:, col].astype(int)` type
+                # assignment cast RHS to LHS dtype -- therefore did not change
+                # LHS dtype -- this broke shit.
+                # Using `df[col] =` assignment instead.
+                df[col] = df.loc[:, col].astype(str).apply(converters[col])
         return df
 
     def _cast_prior_df_from_lines(self, section, lines, pst_path="."):
@@ -1831,15 +1835,18 @@ class Pst(object):
 
         f_out.close()
 
-    def write(self, new_filename, version=None):
+    def write(self, new_filename, version=None, check_interface=False):
         """main entry point to write a pest control file.
 
         Args:
             new_filename (`str`): name of the new pest control file
-
             version (`int`): flag for which version of control file to write (must be 1 or 2).
                 if None, uses the number of pars to decide: if number of pars iis greater than 10,000,
                 version 2 is used.
+            check_interface (`bool`): flag to check the control file par and obs names against the
+                names found in the template and instruction files.  Default is False
+
+
 
         Example::
 
@@ -1850,6 +1857,10 @@ class Pst(object):
             pst.write("my_new_v2.pst",version=2)
 
         """
+
+        if check_interface:
+            pst_path = os.path.split(new_filename)[0]
+            pst_utils.check_interface(self,pst_path)
 
         vstring = "noptmax:{0}, npar_adj:{1}, nnz_obs:{2}".format(
             self.control_data.noptmax, self.npar_adj, self.nnz_obs
@@ -1898,7 +1909,7 @@ class Pst(object):
         # for line in self.other_lines:
         #     f_out.write(line)
         if self.with_comments:
-            for line in self.comments.get("* singular value decompisition", []):
+            for line in self.comments.get("* singular value decomposition", []):
                 f_out.write(line)
         self.svd_data.write(f_out)
 
@@ -2391,13 +2402,13 @@ class Pst(object):
             res = self.res.loc[names, :].residual
             og = obs.obgnme
             res.loc[
-                (og.str.startswith(self.get_constraint_tags('gt'))) &
+                (og.str.startswith(get_constraint_tags('gt'))) &
                 (res <= 0)] = 0
             res.loc[
-                (og.str.startswith(self.get_constraint_tags('lt'))) &
+                (og.str.startswith(get_constraint_tags('lt'))) &
                 (res >= 0)] = 0
             swr = (res * obs.weight) ** 2
-            factors = (1.0 / swr).apply(np.sqrt)
+            factors = (1.0 / swr)**0.5
             if original_ceiling:
                 factors = factors.apply(lambda x: 1.0 if x > 1.0 else x)
 
@@ -2483,10 +2494,10 @@ class Pst(object):
             ).loc[tmpobs.index]
             og = tmpobs.obgnme
             resid.loc[
-                (og.str.startswith(self.get_constraint_tags('gt'))) &
+                (og.str.startswith(get_constraint_tags('gt'))) &
                 (resid <= 0)] = 0
             resid.loc[
-                (og.str.startswith(self.get_constraint_tags('lt'))) &
+                (og.str.startswith(get_constraint_tags('lt'))) &
                 (resid >= 0)] = 0
 
             actual_phi = np.sum(
@@ -2577,15 +2588,14 @@ class Pst(object):
         if obsgrp_dict is not None:
             obs = self.observation_data
             # first zero-weight all obs in groups specified to have 0 contrib to phi
-            for grp, contrib in obsgrp_dict.items():
-                if contrib==0:
-                    obs.loc[obs.obgnme == grp, "weight"] = 0.0
-                    # drop zero- contribution groups
+            original_groups = list(obsgrp_dict.keys())
+            for grp in original_groups:
+                if obsgrp_dict[grp] == 0:
+                    obs.loc[obs.obgnme == grp, "weight"] = 0.
                     del obsgrp_dict[grp]
-            # reset groups with all zero weights
-            for grp in obsgrp_dict.keys():
-                if obs.loc[obs.obgnme == grp, "weight"].sum() == 0.0:
-                    obs.loc[obs.obgnme == grp, "weight"] = 1.0
+                # reset groups with all zero weights
+                elif obs.loc[obs.obgnme == grp, "weight"].sum() == 0:
+                    obs.loc[obs.obgnme==grp, "weight"] = 1.
             self.res.loc[obs.index, 'group'] = obs.obgnme.values
             self.res.loc[obs.index, 'weight'] = obs.weight.values 
             res_groups = self.res.groupby("group").groups
@@ -2748,9 +2758,8 @@ class Pst(object):
             ) + self.parameter_data.offset
             # isnotfixed = self.parameter_data.partrans != "fixed"
             islog = self.parameter_data.partrans == "log"
-            self.parameter_data.loc[islog, col + "_trans"] = self.parameter_data.loc[
-                islog, col + "_trans"
-            ].apply(lambda x: np.log10(x))
+            self.parameter_data.loc[islog, col + "_trans"] = \
+                self.parameter_data.loc[islog, col + "_trans"].apply(np.log10)
 
     def enforce_bounds(self):
         """enforce bounds violation
@@ -3495,8 +3504,8 @@ class Pst(object):
             "pe": "percent error",
         }
 
-        obs.loc[:, "stdev"] = 1.0 / obs.weight
-        obs.loc[:, "pe"] = 100.0 * (obs.stdev / obs.obsval.apply(np.abs))
+        obs["stdev"] = obs.weight**-1
+        obs["pe"] = 100.0 * (obs.stdev / obs.obsval.abs())
         obs = obs.replace([np.inf, -np.inf], np.NaN)
 
         data = {c: [] for c in cols}
@@ -3625,7 +3634,7 @@ class Pst(object):
         """
         obs = self.observation_data
         lt_obs = obs.loc[
-            obs.obgnme.str.startswith(self.get_constraint_tags('lt')) &
+            obs.obgnme.str.startswith(get_constraint_tags('lt')) &
             (obs.weight != 0.0), "obsnme"
         ]
         return lt_obs
@@ -3646,7 +3655,7 @@ class Pst(object):
 
         pi = self.prior_information
         lt_pi = pi.loc[
-            pi.obgnme.str.startswith(self.get_constraint_tags('lt')) &
+            pi.obgnme.str.startswith(get_constraint_tags('lt')) &
             (pi.weight != 0.0), "pilbl"
         ]
         return lt_pi
@@ -3672,7 +3681,7 @@ class Pst(object):
 
         obs = self.observation_data
         gt_obs = obs.loc[
-            obs.obgnme.str.startswith(self.get_constraint_tags('gt')) &
+            obs.obgnme.str.startswith(get_constraint_tags('gt')) &
             (obs.weight != 0.0), "obsnme"
         ]
         return gt_obs
@@ -3694,7 +3703,7 @@ class Pst(object):
 
         pi = self.prior_information
         gt_pi = pi.loc[
-            pi.obgnme.str.startswith(self.get_constraint_tags('gt')) &
+            pi.obgnme.str.startswith(get_constraint_tags('gt')) &
             (pi.weight != 0.0),
             "pilbl"]
         return gt_pi

@@ -7,30 +7,28 @@ analyses (pyemu.Schur and pyemu.ErrVar), data worth analyses and
 high-dimensional ensemble generation.
 """
 
-from .la import LinearAnalysis
-from .sc import Schur
-from .ev import ErrVar
-from .en import Ensemble, ParameterEnsemble, ObservationEnsemble
 from .eds import EnDS
-
+from .en import Ensemble, ObservationEnsemble, ParameterEnsemble
+from .ev import ErrVar
+from .la import LinearAnalysis
+from .logger import Logger
 # from .mc import MonteCarlo
 # from .inf import Influence
-from .mat import Matrix, Jco, Cov
-from .pst import Pst, pst_utils
-from .utils import (
-    helpers,
-    gw_utils,
-    optimization,
-    geostats,
-    pp_utils,
-    os_utils,
-    smp_utils,
-    metrics,
-)
+from .mat import Cov, Jco, Matrix
 from .plot import plot_utils
-from .logger import Logger
+from .pst import Pst, pst_utils
+from .sc import Schur
+from .utils import (geostats, gw_utils, helpers, metrics, optimization,
+                    os_utils, pp_utils, smp_utils)
 
-from .prototypes import *
+#from .prototypes import *
+try:
+    from .legacy import *
+except (ModuleNotFoundError, ImportError) as e:
+    import warnings
+    warnings.warn("Failed to import legacy module. "
+                  "May impact ability to access older methods."
+                  f"{type(e).__name__} {e.msg}")
 
 from ._version import get_versions
 
