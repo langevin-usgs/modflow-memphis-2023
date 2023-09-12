@@ -1,0 +1,9 @@
+#The OPTIONS block is optional
+BEGIN OPTIONS
+END OPTIONS
+
+#The GRIDDATA block is required
+BEGIN GRIDDATA
+ STRT
+  CONSTANT 330.0 Initial Head layers 1 to 3
+END GRIDDATA

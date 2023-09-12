@@ -1,0 +1,21 @@
+BEGIN OPTIONS
+END OPTIONS
+
+BEGIN GRIDDATA
+#
+#icelltype(nodes) is 0:confined, 1:convertible
+ICELLTYPE
+  constant 0
+#
+# horizontal hydraulic conductivity
+K layered
+  constant 50.0
+  constant 0.01
+  constant 200.0
+#
+# vertical hydraulic conductivity
+K33 layered
+  constant 10.0
+  constant 0.01
+  constant 20.0  
+END GRIDDATA
