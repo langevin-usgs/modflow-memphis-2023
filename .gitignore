@@ -1,0 +1,10 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# PyCharm
+.idea/
+
+# ignore all .ipynb_checkpoints
+.ipynb_checkpoints
+
