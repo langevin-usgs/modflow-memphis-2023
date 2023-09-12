@@ -1,0 +1,14 @@
+begin options
+ print_input
+ PRINT_FLOWS
+END OPTIONS
+
+# List of packages. List can be listed in any order.
+BEGIN PACKAGES
+ IC6 ps1a.ic
+ NPF6 ps1a.npf
+ CHD6 ps1a.river.chd
+ CHD6 ps1a.canal.chd
+ OC6 ps1a.oc
+ DIS6 ps1a.dis
+END PACKAGES

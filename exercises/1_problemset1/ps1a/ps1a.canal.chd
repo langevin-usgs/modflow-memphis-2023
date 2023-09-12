@@ -1,0 +1,36 @@
+#The OPTIONS block is optional
+BEGIN OPTIONS
+END OPTIONS
+
+#The DIMENSIONS block is required
+BEGIN DIMENSIONS
+MAXBOUND 21
+END DIMENSIONS
+
+#The following block of constant-head cells will be activated
+#for stress period 1. This block will remain active throughout
+#the simulation.
+BEGIN PERIOD 1
+#l r c head 
+ 1 1 1 330.
+ 1 2 1 330.
+ 1 3 1 330.
+ 1 4 1 330.
+ 1 5 1 330.
+ 1 6 1 330.
+ 1 7 1 330.
+ 1 8 1 330.
+ 1 9 1 330.
+ 1 10 1 330.
+ 1 11 1 330.
+ 1 12 1 330.
+ 1 13 1 330.
+ 1 14 1 330.
+ 1 15 1 330.
+ 1 16 1 330.
+ 1 17 1 330.
+ 1 18 1 330.
+ 1 19 1 330.
+ 1 20 1 330.
+ 1 21 1 330.
+END PERIOD 1
