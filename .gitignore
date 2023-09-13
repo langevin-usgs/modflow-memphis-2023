@@ -1,0 +1,19 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+
+# PyCharm
+.idea/
+
+exercises/3_get_data/
+
+# modflow class related
+*.hds
+*.hed
+*.lst
+*.cbc
+*.bud
+*.grb
+
+RunRequests/
