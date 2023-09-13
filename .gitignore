@@ -9,5 +9,7 @@ __pycache__/
 .ipynb_checkpoints
 
 3_get_data/
+test/
+
 *.lst
 *.grb
