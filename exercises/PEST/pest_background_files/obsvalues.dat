@@ -33,6 +33,9 @@ u14        2.70         1.0          headgroup
 u15        4.59         1.0          headgroup
 u16        2.76         1.0          headgroup
 u17        6.23         1.0          headgroup 
+uw02       0.28         0.01         headdiffgroup
+uw08       0.03         0.01         headdiffgroup
+uw15       0.02         0.01         headdiffgroup
 chdflow 33390.41096  0.000299487       lakegroup
 pf      -96402.      0.000103732   rivgroup
 ds     -894494.       1.26889E-05       rivgroup  
