@@ -1,0 +1,16 @@
+begin options
+  BOUNDNAMES
+  PRINT_INPUT
+  PRINT_FLOWS
+  SAVE_FLOWS
+  OBS6 FILEIN chd.obs
+end options
+
+begin dimensions
+  MAXBOUND 65
+end dimensions
+
+begin period 1
+  open/close chd.ref
+end period
+
